@@ -1,9 +1,11 @@
 # PapersWithCode Implementations
 
-This repository contains implementations of research papers that I have read, recreated from scratch using PyTorch. Each subdirectory includes:
+This repository contains implementations of research papers that I have read, recreated from scratch using PyTorch.
++ Also, folders in the repo contain the code of respective deep learning arch and the article papers.
++ The purpose of this repo is that take note
++ The purpose of this repo is that to collect the papers that a cs student should read on deep learning, along the their code.
 
-Also, folders in the repo contain the code of respective deep learning arch and the article papers.
-## Table Of Content
+## Table Of Content (The papers i have completed)
 
 + GoogleNet
 + LeNet
