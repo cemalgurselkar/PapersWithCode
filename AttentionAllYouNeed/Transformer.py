@@ -155,30 +155,31 @@ class Transformer(nn.Module):
         output = self.output_layer(dec_output)
         return output
 
-# Model parameters
-src_vocab_size = 5000 #Source vocabulary size
-tgt_vocab_size = 5000 #Target vocabulary size
-d_model = 512 # Embedding Dimension
-num_heads = 8 # Number of attention heads
-num_layers = 6 # Number of encoder/decoder layers
-d_ff = 2048 # Feed-Forward dimension
-dropout = 0.1
+if __name__ == '__main__':
+    # Model parameters
+    src_vocab_size = 5000 #Source vocabulary size
+    tgt_vocab_size = 5000 #Target vocabulary size
+    d_model = 512 # Embedding Dimension
+    num_heads = 8 # Number of attention heads
+    num_layers = 6 # Number of encoder/decoder layers
+    d_ff = 2048 # Feed-Forward dimension
+    dropout = 0.1
 
-model = Transformer(
-    src_vocab_size=src_vocab_size,
-    tgt_vocab_size=tgt_vocab_size,
-    d_model=d_model,
-    num_heads=num_heads,
-    num_layers=num_layers,
-    d_ff=d_ff,
-    dropout=dropout
-)
+    model = Transformer(
+        src_vocab_size=src_vocab_size,
+        tgt_vocab_size=tgt_vocab_size,
+        d_model=d_model,
+        num_heads=num_heads,
+        num_layers=num_layers,
+        d_ff=d_ff,
+        dropout=dropout
+    )
 
-src = torch.randint(1, src_vocab_size, (32, 20))
-tgt = torch.randint(1, tgt_vocab_size, (32, 15))
-try:
-    output = model(src,tgt)
-    print(f"Output'shape is: {output.shape}")
-    print(output)
-except Exception as e:
-    print(f"Error is: {e}")
+    src = torch.randint(1, src_vocab_size, (32, 20))
+    tgt = torch.randint(1, tgt_vocab_size, (32, 15))
+    try:
+        output = model(src,tgt)
+        print(f"Output'shape is: {output.shape}")
+        print(output)
+    except Exception as e:
+        print(f"Error is: {e}")
