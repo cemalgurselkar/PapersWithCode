@@ -7,11 +7,9 @@ This repository contains implementations of research papers that I have read, re
 
 ## Table Of Content (The papers i have completed)
 
-+ GoogleNet
++ Attention is All You Need
 + LeNet
 + ResNet
-+ EfficientNet
-+ VGG_Net
 
 
 #### Required Packages (Python3.12)
