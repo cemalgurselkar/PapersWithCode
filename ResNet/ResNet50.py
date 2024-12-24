@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class block(nn.Module):
     def __init__(self,in_channels,out_channels,identify_downsamples=None):
         super(block,self).__init__()
@@ -28,7 +29,7 @@ class block(nn.Module):
         x = self.relu(x)
         return x
 
-
+# Resnet Architecture
 class ResNet(nn.Module):
     def __init__(self,block,layers,img_channels,num_channels):
         super(ResNet,self).__init__()
@@ -47,17 +48,6 @@ class ResNet(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((1,1))
         self.fc = nn.Linear(512*4,num_channels)
 
-    def forward(self,x):
-        x = self.maxpool(self.relu(self.bn1(self.conv1(x))))
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-        x = self.avgpool(x)
-        x = x.reshape(x.shape[0], -1)
-        x = self.fc(x)
-        return x
-    
     def _make_layer(self,block,num_residual_blocks,out_channels,stride):
         identify_downsample = None
         layers = []
@@ -73,7 +63,19 @@ class ResNet(nn.Module):
             layers.append(block(self.in_channels, out_channels)) # 256 -> 64, 64*4 (256) again
         
         return nn.Sequential(*layers)
+
+    def forward(self,x):
+        x = self.maxpool(self.relu(self.bn1(self.conv1(x))))
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.avgpool(x)
+        x = x.reshape(x.shape[0], -1)
+        x = self.fc(x)
+        return x
     
+
 def ResNet50(img_channels=3,num_classes=1000):
     return ResNet(block,[3, 4, 6, 3], img_channels, num_classes)
 
@@ -98,6 +100,5 @@ def test():
         # hepsinde sonuç aynı çikti -----> torch.Size([2,1000])
     except Exception as e:
         print(f"Hata Mesajiniz: {e}")
-
 
 test()

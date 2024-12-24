@@ -21,12 +21,6 @@ class VGG_Net(nn.Module):
             nn.Linear(4096,num_classes)
         )
 
-    def forward(self,x):
-        x = self.conv_layers(x)
-        x = x.reshape(x.shape[0], -1)
-        x = self.fcs(x)
-        return x
-
     def create_conv_layers(self,architecture):
         layers = []
         in_channels = self.in_channels
@@ -43,6 +37,12 @@ class VGG_Net(nn.Module):
                 layers += [nn.MaxPool2d(kernel_size=(2,2),stride=(2,2))]
         
         return nn.Sequential(*layers)
+    
+    def forward(self,x):
+        x = self.conv_layers(x)
+        x = x.reshape(x.shape[0], -1)
+        x = self.fcs(x)
+        return x
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
