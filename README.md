@@ -12,10 +12,9 @@ This repository contains implementations of research papers that I have read, re
 + ResNet
 
 
-#### Required Packages (Python3.12)
+#### Required Packages (I use Python3.10 but the codes are available to run at each python version)
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirement.txt
+python3 -m venv venv #create a virtual enviroment
+source venv/bin/activate #
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
-* Note: If torch cannot be downloaded succesfully, you can try from their website.
