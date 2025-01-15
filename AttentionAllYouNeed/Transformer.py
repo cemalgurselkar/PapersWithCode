@@ -114,19 +114,19 @@ class DecoderLayer(nn.Module):
         return x
 
 class Transformer(nn.Module):
-    def __init__(self, src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length=5000, dropout=0.1):
+    def __init__(self, config):
         super().__init__()
 
-        self.src_embed = nn.Embedding(src_vocab_size,d_model)
-        self.tgt_embed = nn.Embedding(tgt_vocab_size,d_model)
-        self.positional_encoding = PositionalEncoding(d_model,max_seq_length)
+        self.src_embed = nn.Embedding(config.src_vocab_size,config.d_model)
+        self.tgt_embed = nn.Embedding(config.tgt_vocab_size,config.d_model)
+        self.positional_encoding = PositionalEncoding(config.d_model,config.max_seq_length)
 
-        self.encoder_layers = nn.ModuleList([EncoderLayer(d_model,num_heads,d_ff,dropout) for _ in range(num_layers)])
-        self.decoder_layers = nn.ModuleList([DecoderLayer(d_model,num_heads,d_ff,dropout) for _ in range(num_layers)])
+        self.encoder_layers = nn.ModuleList([EncoderLayer(config.d_model,config.num_heads,config.d_ff,config.dropout) for _ in range(config.num_layers)])
+        self.decoder_layers = nn.ModuleList([DecoderLayer(config.d_model,config.num_heads,config.d_ff,config.dropout) for _ in range(config.num_layers)])
 
-        self.output_layer = nn.Linear(d_model,tgt_vocab_size)
+        self.output_layer = nn.Linear(config.d_model,config.tgt_vocab_size)
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(config.dropout)
     
     def generate_mask(self,source,tgt):
         source_mask = (source != 0).unsqueeze(1).unsqueeze(2)
@@ -156,30 +156,17 @@ class Transformer(nn.Module):
         return output
 
 if __name__ == '__main__':
-    # Model parameters
-    src_vocab_size = 5000 #Source vocabulary size
-    tgt_vocab_size = 5000 #Target vocabulary size
-    d_model = 512 # Embedding Dimension
-    num_heads = 8 # Number of attention heads
-    num_layers = 6 # Number of encoder/decoder layers
-    d_ff = 2048 # Feed-Forward dimension
-    dropout = 0.1
+    from config import Config
+    config = Config()
 
-    model = Transformer(
-        src_vocab_size=src_vocab_size,
-        tgt_vocab_size=tgt_vocab_size,
-        d_model=d_model,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        d_ff=d_ff,
-        dropout=dropout
-    )
+    model = Transformer(config)
 
-    src = torch.randint(1, src_vocab_size, (32, 20))
-    tgt = torch.randint(1, tgt_vocab_size, (32, 15))
+    src = torch.randint(1, config.src_vocab_size, (32, 20))
+    tgt = torch.randint(1, config.tgt_vocab_size, (32, 15))
     try:
+        print(f'src shape: {src.shape}')
+        print(f"tgt shape: {tgt.shape}")
         output = model(src,tgt)
         print(f"Output'shape is: {output.shape}")
-        print(output)
     except Exception as e:
         print(f"Error is: {e}")
