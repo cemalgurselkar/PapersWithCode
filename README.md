@@ -10,7 +10,7 @@ This repository contains implementations of research papers that I have read, re
 + Attention is All You Need
 + LeNet
 + ResNet
-
++ Denoising Diffusion Probabilistic Models
 
 #### Required Packages (I use Python3.10 but the codes are available to run at each python version)
 ```bash

@@ -1,133 +1,186 @@
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from tqdm import tqdm
-from torchvision import datasets, transforms
+from torch.optim import Adam
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
+from torchvision import datasets, transforms
+from tqdm import tqdm
 
+img_size = 28
+num_channel = 1
+
+batch_size = 2
+num_epoch = 10
+lr = 0.001
+
+num_timestep = 1000
+beta_start = 0.0001
+beta_end = 0.02
+time_embed_dim = 32
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 
-
-def linear_beta_schedule(timesteps):
-    beta_start = 1e-4
-    beta_end = 0.02
-    return torch.linspace(beta_start, beta_end, timesteps)
-
-
-class SinusoidalPosEmb(nn.Module):
-    def __init__(self, dim):
+class TimeEmbedding(nn.Module):
+    """
+    PE_(pos,2i) = sin(pos/10000^(2*i/d_model))
+    PE_(pos,2i+1) = cos(pos/10000^(2*i/d_model))
+    """
+    def __init__(self, num_timestep, time_embed_dim):
         super().__init__()
-        self.dim = dim
+        self.num_ts = num_timestep
+        self.time_embedding = time_embed_dim
 
-    def forward(self, t):
-        device = t.device
-        half_dim = self.dim // 2
-        emb = np.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = t[:, None] * emb[None, :]
-        return torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
+    def forward(self):
+        time = torch.arange(self.num_ts, device=device).reshape(self.num_ts, 1)
+        i = torch.arange(0, self.time_embedding, 2, device=device)
+        denominator = torch.pow(10000, i/self.time_embedding)
 
-class SimpleUnet(nn.Module):
-    def __init__(self):
+        even_time_emb = torch.sin(time/denominator)
+        odd_time_emb = torch.cos(time/denominator)
+
+        stacked = torch.stack([even_time_emb, odd_time_emb], dim=2)
+        time_embedding = torch.flatten(stacked, start_dim=1, end_dim=2)
+        return time_embedding
+
+class DoubleConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(32),
-            nn.Linear(32, 128),
-            nn.ReLU()
-        )
+        self.conv0 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, bias=False, padding=1)
 
-        self.conv1 = nn.Conv2d(1, 64, 3, padding=1)
-        self.conv2 = nn.Conv2d(64, 64, 3, padding=1)
-        self.conv3 = nn.Conv2d(64, 1, 3, padding=1)
+        self.bn0 = nn.BatchNorm2d(num_features=out_channels)
+        self.time_embedding = TimeEmbedding(num_timestep=num_timestep, time_embed_dim=time_embed_dim)
+        self.linear = nn.Linear(in_features=time_embed_dim, out_features=out_channels)
 
-        self.time_dense = nn.Linear(128, 64)
+        self.conv1 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, bias=False, padding=1)
+        self.bn1 = nn.BatchNorm2d(num_features=out_channels)
+        self.relu = nn.ReLU()
 
     def forward(self, x, t):
-        t_emb = self.time_mlp(t)
-        t_emb = self.time_dense(t_emb)[:, :, None, None]
+        """
+    block = conv0 -> batch0 -> relu
+    block = block + time_embd
+    blokc = conv1 -> batch1 -> relu
+        """
+        x = self.relu(self.bn0(self.conv0(x)))
 
-        x = self.conv1(x) + t_emb
-        x = F.relu(x)
-        x = F.relu(self.conv2(x))
-        return self.conv3(x)
-
-class Diffusion:
-    def __init__(self, timesteps=1000):
-        self.timesteps = timesteps
-        self.betas = linear_beta_schedule(timesteps).to(device)
-        self.alphas = 1. - self.betas
-        self.alpha_cumprod = torch.cumprod(self.alphas, axis=0)# type:ignore
-
-    def q_sample(self, x0, t, noise=None):
-        if noise is None:
-            noise = torch.randn_like(x0)
-        sqrt_alpha_cumprod = self.alpha_cumprod[t].sqrt().view(-1, 1, 1, 1)
-        sqrt_one_minus = (1 - self.alpha_cumprod[t]).sqrt().view(-1, 1, 1, 1)
-        return sqrt_alpha_cumprod * x0 + sqrt_one_minus * noise
-
-    def p_sample(self, model, xt, t):
-        betas_t = self.betas[t].view(-1, 1, 1, 1)
-        sqrt_recip_alpha = (1. / self.alphas[t]).sqrt().view(-1, 1, 1, 1)
-        sqrt_one_minus = (1 - self.alpha_cumprod[t]).sqrt().view(-1, 1, 1, 1)
+        time_emb = self.time_embedding()[t]
         
-        eps_theta = model(xt, t)
-        mean = sqrt_recip_alpha * (xt - betas_t / sqrt_one_minus * eps_theta)
+        time_emb = self.linear(time_emb) # type: ignore
+        time_emb = time_emb[:, :, None, None]
 
-        noise = torch.randn_like(xt) if t[0] != 0 else torch.zeros_like(xt)
-        return mean + betas_t.sqrt() * noise
+        x = x + time_emb
+        
+        x = self.relu(self.bn1(self.conv1(x)))
+        return x
 
-def train(model, diffusion, dataloader, optimizer, epochs=5):
-    model.train()
-    for epoch in range(epochs):
-        for x in tqdm(dataloader):
-            x = x[0]  # images
-            x = x.to(device)
-            t = torch.randint(0, diffusion.timesteps, (x.size(0),), device=x.device).long()
-            noise = torch.randn_like(x)
-            x_noisy = diffusion.q_sample(x, t, noise)
-            noise_pred = model(x_noisy, t)
+class DownSample(nn.Module): #Encoder
+    def __init__(self, in_channel, out_channel):
+        self.double_conv = DoubleConv(in_channels=in_channel, out_channels=out_channel)
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-            loss = F.mse_loss(noise_pred, noise)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-        print(f"Epoch {epoch+1}: loss = {loss.item():.4f}")
+    def forward(self, x, t):
+        convolved = self.double_conv(x, t)
+        maxpooled = self.maxpool(convolved)
+        return convolved, maxpooled
 
-@torch.no_grad()
-def sample(model, diffusion, shape):
-    model.eval()
-    img = torch.randn(shape).to(device)
-    for t in reversed(range(diffusion.timesteps)):
-        time = torch.full((shape[0],), t, device=device, dtype=torch.long)
-        img = diffusion.p_sample(model, img, time)
-    return img
+class UpSample(nn.Module): #Decoder
+    def __init__(self, in_channel, out_channel):
+        self.conv_transpose = nn.ConvTranspose2d(in_channels=in_channel, out_channels=out_channel, kernel_size=2, stride=2)
+        self.double_conv = DoubleConv(in_channels=in_channel, out_channels=out_channel)
+    
+    def forward(self, x, t, connection):
+        x = self.conv_transpose(x)
+        x = torch.cat([x, connection], dim=1)
+        x = self.double_conv(x)
+        return x
 
-def get_data():
+class UNet(nn.Module):
+    def __init__(self, num_channel):
+        super().__init__()
+        self.num_channel = num_channel
+        
+        self.downsample0 = DownSample(in_channel=self.num_channel, out_channel=64)
+        self.downsample1 = DownSample(in_channel=64, out_channel=128)
+
+        self.bottleneck = DoubleConv(in_channels=128, out_channels=256)
+
+        self.upsample0 = UpSample(in_channel=256, out_channel=128)
+        self.upsample1 = UpSample(in_channel=128, out_channel=64)
+
+        self.output = nn.Conv2d(in_channels=64, out_channels=num_channel, kernel_size=1)
+    
+    def forward(self, x, t):
+        convolved0, maxpooled0 = self.downsample0(x,t)
+        convolved1, maxpooled1 = self.downsample1(maxpooled0, t)
+
+        x = self.bottleneck(maxpooled1, t)
+
+        upsample0 = self.upsample0(x,t, convolved1)
+        upsample1 = self.upsample1(upsample0, t, convolved0)
+
+        x = self.output(upsample1)
+        return x
+
+unet_test = UNet(num_channel=num_channel).to(device=device)
+
+def get_data(batch_size=16):
     transform = transforms.Compose([
-        transforms.ToTensor(),         # [0,1]
-        transforms.Lambda(lambda x: x * 2 - 1)  # [-1,1] aralığına çek
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))
     ])
+    data = datasets.MNIST(root="./data", train=True, download=True, transform=transform)
+    loader = DataLoader(data, batch_size=batch_size, drop_last=True, shuffle=True)
+    images, labels = next(iter(loader))
+    return images, labels
 
-    mnist = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-    dataloader = DataLoader(mnist, batch_size=128, shuffle=True)
-    return dataloader
+images, labels = get_data(batch_size=batch_size)
 
-model = SimpleUnet().to(device)
-diffusion = Diffusion(timesteps=1000)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-dataloader = get_data()
-train(model, diffusion, dataloader, optimizer, epochs=5)
+class NoiseSchedular:
+    def __init__(self):
+        self.betas = torch.linspace(beta_start, beta_end, num_timestep)
+        self.alphas = 1. - self.betas
+        self.alphas_cum_prod = torch.cumprod(self.alphas, dim=0)
+        self.sqrt_alphas_cum_prod = torch.sqrt(self.alphas_cum_prod)
+        self.sqrt_one_minus_alphas_cum_prod = torch.sqrt(1. - self.alphas_cum_prod)
+    
+    def forward_diffusion(self, original, noise, t):
+        """
+        x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t)
+        """
+        sqrt_alphas_cum_prod_t = self.sqrt_alphas_cum_prod[t]
+        sqrt_alphas_cum_prod_t = sqrt_alphas_cum_prod_t.to(device=device)
 
-@torch.no_grad()
-def show_sample(model, diffusion, img_size=(1, 28, 28)):
-    sampled_images = sample(model, diffusion, shape=(16, *img_size))
-    sampled_images = (sampled_images + 1) * 0.5  # [0,1] aralığına getir
+        sqrt_one_minus_alphas_cum_prod_t = self.sqrt_one_minus_alphas_cum_prod[t]
+        sqrt_one_minus_alphas_cum_prod_t = sqrt_one_minus_alphas_cum_prod_t.to(device=device).view(-1,1,1,1)
 
-    grid_img = torch.cat([sampled_images[i] for i in range(16)], dim=2)
-    plt.imshow(grid_img.permute(1, 2, 0).squeeze().cpu().numpy(), cmap='gray')
-    plt.axis('off')
-    plt.show()
+        noisy_image = sqrt_alphas_cum_prod_t * original + sqrt_one_minus_alphas_cum_prod_t * noise
+        return noisy_image
+    
+    def backward_diffusion(self, current_image, predicted_noise, t):  #(1)
+        denoised_image = (current_image - (self.sqrt_one_minus_alphas_cum_prod[t] * predicted_noise)) / self.sqrt_alphas_cum_prod[t]  #(2)
+        denoised_image = 2 * (denoised_image - denoised_image.min()) / (denoised_image.max() - denoised_image.min()) - 1  #(3)
+        
+        current_prediction = current_image - ((self.betas[t] * predicted_noise) / (self.sqrt_one_minus_alphas_cum_prod[t]))  #(4)
+        current_prediction = current_prediction / torch.sqrt(self.alphas[t])  #(5)
+        
+        if t == 0:  #(6)
+            return current_prediction, denoised_image
+        
+        else:
+            variance = (1 - self.alphas_cum_prod[t-1]) / (1. - self.alphas_cum_prod[t])  #(7)
+            variance = variance * self.betas[t]  #(8)
+            sigma = variance ** 0.5
+            z = torch.randn(current_image.shape).to(device=device)
+            current_prediction = current_prediction + sigma*z
+            
+            return current_prediction, denoised_image
 
-show_sample(model, diffusion)
+noise_schedular = NoiseSchedular()
+
+image = images[0]
+noise = torch.randn_like(image)
+
+plt.imshow(image.squeeze(), cmap="gray")
+plt.show()
+plt.imshow(noise.squeeze(), cmap="gray")
+plt.show()
