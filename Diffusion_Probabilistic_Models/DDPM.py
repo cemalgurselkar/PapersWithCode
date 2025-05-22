@@ -75,6 +75,7 @@ class DoubleConv(nn.Module):
 
 class DownSample(nn.Module): #Encoder
     def __init__(self, in_channel, out_channel):
+        super().__init__()
         self.double_conv = DoubleConv(in_channels=in_channel, out_channels=out_channel)
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
 
@@ -85,19 +86,21 @@ class DownSample(nn.Module): #Encoder
 
 class UpSample(nn.Module): #Decoder
     def __init__(self, in_channel, out_channel):
+        super().__init__()
         self.conv_transpose = nn.ConvTranspose2d(in_channels=in_channel, out_channels=out_channel, kernel_size=2, stride=2)
         self.double_conv = DoubleConv(in_channels=in_channel, out_channels=out_channel)
     
     def forward(self, x, t, connection):
         x = self.conv_transpose(x)
         x = torch.cat([x, connection], dim=1)
-        x = self.double_conv(x)
+        x = self.double_conv(x, t)
         return x
 
+
 class UNet(nn.Module):
-    def __init__(self, num_channel):
+    def __init__(self, num_channels):
         super().__init__()
-        self.num_channel = num_channel
+        self.num_channel = num_channels
         
         self.downsample0 = DownSample(in_channel=self.num_channel, out_channel=64)
         self.downsample1 = DownSample(in_channel=64, out_channel=128)
@@ -121,8 +124,6 @@ class UNet(nn.Module):
         x = self.output(upsample1)
         return x
 
-unet_test = UNet(num_channel=num_channel).to(device=device)
-
 def get_data(batch_size=16):
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -130,10 +131,9 @@ def get_data(batch_size=16):
     ])
     data = datasets.MNIST(root="./data", train=True, download=True, transform=transform)
     loader = DataLoader(data, batch_size=batch_size, drop_last=True, shuffle=True)
-    images, labels = next(iter(loader))
-    return images, labels
+    return loader
 
-images, labels = get_data(batch_size=batch_size)
+loader = get_data(batch_size=batch_size)
 
 class NoiseSchedular:
     def __init__(self):
@@ -146,14 +146,15 @@ class NoiseSchedular:
     def forward_diffusion(self, original, noise, t):
         """
         x_t = sqrt(alpha_t) * x_0 + sqrt(1 - alpha_t)
+        cum_prod = cumulative production
         """
         sqrt_alphas_cum_prod_t = self.sqrt_alphas_cum_prod[t]
-        sqrt_alphas_cum_prod_t = sqrt_alphas_cum_prod_t.to(device=device)
+        sqrt_alphas_cum_prod_t = sqrt_alphas_cum_prod_t.to(device=device).view(-1, 1, 1, 1)
 
         sqrt_one_minus_alphas_cum_prod_t = self.sqrt_one_minus_alphas_cum_prod[t]
         sqrt_one_minus_alphas_cum_prod_t = sqrt_one_minus_alphas_cum_prod_t.to(device=device).view(-1,1,1,1)
 
-        noisy_image = sqrt_alphas_cum_prod_t * original + sqrt_one_minus_alphas_cum_prod_t * noise
+        noisy_image = (sqrt_alphas_cum_prod_t * original) + (sqrt_one_minus_alphas_cum_prod_t * noise)
         return noisy_image
     
     def backward_diffusion(self, current_image, predicted_noise, t):  #(1)
@@ -175,12 +176,33 @@ class NoiseSchedular:
             
             return current_prediction, denoised_image
 
-noise_schedular = NoiseSchedular()
+def train(loader, epochs=5):
+    model = UNet(num_channels=num_channel).to(device=device)
+    noise_schedular = NoiseSchedular()
 
-image = images[0]
-noise = torch.randn_like(image)
+    optimizer = Adam(model.parameters(), lr=lr)
+    loss_func = nn.MSELoss()
+    lossess = []
 
-plt.imshow(image.squeeze(), cmap="gray")
-plt.show()
-plt.imshow(noise.squeeze(), cmap="gray")
+    for epoch in range(epochs):
+        print(f"Epoch No: {epoch+1}")
+
+        for image, _ in tqdm(loader):
+            optimizer.zero_grad()
+            image = image.float().to(device)
+            noise = torch.randn_like(image)
+            t = torch.randint(0, num_timestep, (batch_size,))
+
+            noise_image = noise_schedular.forward_diffusion(image, noise,t).to(device)
+            predicted_noise = model(noise_image, t)
+            loss = loss_func(predicted_noise, noise)
+
+            lossess.append(loss.item())
+            loss.backward()
+            optimizer.step()
+    
+    return lossess
+
+losses = train(loader=loader, epochs=15)
+plt.plot(losses)
 plt.show()
